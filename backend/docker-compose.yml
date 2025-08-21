@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: buildcorp_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: buildcorp_db
+      POSTGRES_USER: buildcorp_user
+      POSTGRES_PASSWORD: secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    networks:
+      - buildcorp_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U buildcorp_user -d buildcorp_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # BuildCorp Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: buildcorp_backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=buildcorp_user
+      - DB_PASSWORD=secure_password
+      - DB_NAME=buildcorp_db
+      - DB_SSL_MODE=disable
+      - JWT_SECRET=your_super_secret_jwt_key_here_make_it_long_and_random
+      - JWT_EXPIRY=24h
+      - JWT_REFRESH_EXPIRY=168h
+      - SERVER_PORT=8080
+      - SERVER_HOST=0.0.0.0
+      - ENVIRONMENT=development
+      - UPLOAD_PATH=./uploads
+      - MAX_FILE_SIZE=5242880
+      - ALLOWED_IMAGE_TYPES=jpg,jpeg,png,webp
+      - ALLOWED_DOC_TYPES=pdf,doc,docx
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+      - CORS_ALLOWED_METHODS=GET,POST,PUT,DELETE,OPTIONS
+      - CORS_ALLOWED_HEADERS=Origin,Content-Type,Authorization,X-Requested-With
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      - RATE_LIMIT_REQUESTS=100
+      - RATE_LIMIT_DURATION=1m
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - buildcorp_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis (for future caching)
+  redis:
+    image: redis:7-alpine
+    container_name: buildcorp_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - buildcorp_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # pgAdmin (Database Management)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: buildcorp_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@buildcorp.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - db
+    networks:
+      - buildcorp_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  buildcorp_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
