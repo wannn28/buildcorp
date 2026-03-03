@@ -52,6 +52,10 @@ func main() {
 	// Create Gin router
 	r := gin.New()
 
+	// Don't trust all proxies (avoids client IP spoofing). Set to nil in dev; in production
+	// behind a reverse proxy, set to your proxy CIDRs e.g. []string{"127.0.0.1/8", "::1/128"}.
+	r.SetTrustedProxies(nil)
+
 	// Middleware
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
@@ -72,6 +76,7 @@ func main() {
 		auth := api.Group("/auth")
 		{
 			auth.POST("/login", handlers.Login)
+			auth.POST("/register", middleware.AuthMiddleware(), handlers.Register)
 			auth.POST("/logout", middleware.AuthMiddleware(), handlers.Logout)
 			auth.POST("/refresh", handlers.RefreshToken)
 			auth.GET("/profile", middleware.AuthMiddleware(), handlers.GetProfile)

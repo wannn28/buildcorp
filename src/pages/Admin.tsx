@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import AdminAuth from '../components/AdminAuth';
+import { auth, authApi, type User } from '../services/api';
 
 interface Project {
   id: number;
@@ -59,8 +60,16 @@ interface Service {
 }
 
 const Admin: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(auth.isLoggedIn());
+  const [currentUser, setCurrentUser] = useState<User | null>(auth.getUser());
   const [activeTab, setActiveTab] = useState('projects');
+
+  // Register modal state
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+  const [regForm, setRegForm] = useState({ username: '', email: '', password: '', confirmPassword: '' });
+  const [regError, setRegError] = useState('');
+  const [regSuccess, setRegSuccess] = useState('');
+  const [regLoading, setRegLoading] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -178,17 +187,58 @@ const Admin: React.FC = () => {
     setSelectedService(null);
   };
 
-  const handleLogin = (username: string, password: string) => {
+  useEffect(() => {
+    if (isAuthenticated) {
+      setCurrentUser(auth.getUser());
+    }
+  }, [isAuthenticated]);
+
+  const handleLogin = () => {
     setIsAuthenticated(true);
+    setCurrentUser(auth.getUser());
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try { await authApi.logout(); } catch { /* ignore */ }
+    auth.clearTokens();
     setIsAuthenticated(false);
+    setCurrentUser(null);
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError('');
+    setRegSuccess('');
+
+    if (regForm.password !== regForm.confirmPassword) {
+      setRegError('Password dan konfirmasi password tidak cocok');
+      return;
+    }
+    if (regForm.password.length < 6) {
+      setRegError('Password minimal 6 karakter');
+      return;
+    }
+
+    setRegLoading(true);
+    try {
+      await authApi.register({
+        username: regForm.username,
+        email: regForm.email,
+        password: regForm.password,
+        role: 'admin',
+      });
+      setRegSuccess(`Admin "${regForm.username}" berhasil didaftarkan`);
+      setRegForm({ username: '', email: '', password: '', confirmPassword: '' });
+    } catch (err: unknown) {
+      setRegError(err instanceof Error ? err.message : 'Gagal mendaftarkan admin');
+    } finally {
+      setRegLoading(false);
+    }
   };
 
   // Show authentication if not logged in
   if (!isAuthenticated) {
-    return <AdminAuth onLogin={handleLogin} isAuthenticated={isAuthenticated} />;
+    return <AdminAuth onLogin={handleLogin} />;
   }
 
   return (
@@ -199,13 +249,24 @@ const Admin: React.FC = () => {
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
             <div className="flex items-center space-x-4">
+              {currentUser && (
+                <span className="text-sm text-gray-500">
+                  Halo, <strong>{currentUser.username}</strong>
+                </span>
+              )}
+              <button
+                onClick={() => { setIsRegisterOpen(true); setRegError(''); setRegSuccess(''); }}
+                className="bg-orange-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-orange-700"
+              >
+                + Tambah Admin
+              </button>
               <button
                 onClick={handleLogout}
-                className="text-gray-600 hover:text-gray-800 px-3 py-2 rounded-md text-sm font-medium"
+                className="text-gray-600 hover:text-gray-800 px-3 py-2 rounded-md text-sm font-medium border border-gray-300 rounded-md"
               >
                 Logout
               </button>
-              <Link to="/" className="text-orange-600 hover:text-orange-800">
+              <Link to="/" className="text-orange-600 hover:text-orange-800 text-sm">
                 ← Kembali ke Website
               </Link>
             </div>
@@ -706,6 +767,102 @@ const Admin: React.FC = () => {
                     className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700"
                   >
                     Simpan Proyek
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Register Admin Modal */}
+      {isRegisterOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full shadow-xl">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-semibold text-gray-900">Daftarkan Admin Baru</h2>
+                <button
+                  onClick={() => setIsRegisterOpen(false)}
+                  className="text-gray-400 hover:text-gray-600 text-2xl font-bold leading-none"
+                >
+                  ×
+                </button>
+              </div>
+
+              <form onSubmit={handleRegister} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                  <input
+                    type="text"
+                    required
+                    minLength={3}
+                    maxLength={50}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                    placeholder="Minimal 3 karakter"
+                    value={regForm.username}
+                    onChange={(e) => setRegForm({ ...regForm, username: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input
+                    type="email"
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                    placeholder="email@contoh.com"
+                    value={regForm.email}
+                    onChange={(e) => setRegForm({ ...regForm, email: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                    placeholder="Minimal 6 karakter"
+                    value={regForm.password}
+                    onChange={(e) => setRegForm({ ...regForm, password: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Konfirmasi Password</label>
+                  <input
+                    type="password"
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                    placeholder="Ulangi password"
+                    value={regForm.confirmPassword}
+                    onChange={(e) => setRegForm({ ...regForm, confirmPassword: e.target.value })}
+                  />
+                </div>
+
+                {regError && (
+                  <div className="text-red-600 text-sm bg-red-50 p-3 rounded-md">{regError}</div>
+                )}
+                {regSuccess && (
+                  <div className="text-green-700 text-sm bg-green-50 p-3 rounded-md">{regSuccess}</div>
+                )}
+
+                <div className="flex justify-end space-x-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsRegisterOpen(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    Tutup
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={regLoading}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-md text-sm hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {regLoading ? 'Mendaftarkan...' : 'Daftarkan Admin'}
                   </button>
                 </div>
               </form>
